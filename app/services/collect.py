@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from collections.abc import Callable
 from enum import StrEnum
 
 import httpx
@@ -7,10 +9,13 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.models.job import JobModel
 from app.sources.github import GithubSource
+from app.sources.source import SourceBase
 
 logger = logging.getLogger(__name__)
 
-ENABLED_SOURCES = [GithubSource]
+SourceFactory = Callable[[], SourceBase]
+
+ENABLED_SOURCES: list[SourceFactory] = [GithubSource]
 
 
 class RunStatus(StrEnum):
@@ -25,44 +30,50 @@ class PostbackPayload(BaseModel):
     source: str | None = None
     jobs: list[JobModel] = []
     error: str | None = None
+    failed_sources: list[str] = []
 
 
 class CollectService:
     async def run_and_notify(self, run_id: str, postback_url: str) -> None:
-        last_index = len(ENABLED_SOURCES) - 1
+        failed_sources: list[str] = []
 
-        for index, source in enumerate(ENABLED_SOURCES):
-            instance = source()
+        async def collect_one(factory: SourceFactory) -> None:
+            name = getattr(factory, "__name__", "unknown")
             try:
-                jobs = await instance.collect()
+                instance = factory()
+                name = instance.name
+                async with asyncio.timeout(get_settings().source_timeout):
+                    jobs = await instance.collect()
             except Exception as exc:
-                logger.exception("Collect run %s failed on %s", run_id, instance.name)
-                await self._send_postback(
-                    postback_url,
-                    PostbackPayload(
-                        run_id=run_id,
-                        status=RunStatus.FAILED,
-                        source=instance.name,
-                        error=str(exc),
-                    ),
+                logger.exception("Collect run %s failed on %s", run_id, name)
+                failed_sources.append(name)
+                payload = PostbackPayload(
+                    run_id=run_id,
+                    status=RunStatus.FAILED,
+                    source=name,
+                    error=str(exc) or type(exc).__name__,
                 )
-                return
+            else:
+                payload = PostbackPayload(
+                    run_id=run_id,
+                    status=RunStatus.COLLECTING,
+                    source=name,
+                    jobs=jobs,
+                )
+            await self._send_postback(postback_url, payload)
 
-            status = (
-                RunStatus.COMPLETED if index == last_index else RunStatus.COLLECTING
-            )
-            await self._send_postback(
-                postback_url,
-                PostbackPayload(
-                    run_id=run_id, status=status, source=instance.name, jobs=jobs
-                ),
-            )
+        async with asyncio.TaskGroup() as tg:
+            for factory in ENABLED_SOURCES:
+                tg.create_task(collect_one(factory))
 
-        if not ENABLED_SOURCES:
-            await self._send_postback(
-                postback_url,
-                PostbackPayload(run_id=run_id, status=RunStatus.COMPLETED),
-            )
+        await self._send_postback(
+            postback_url,
+            PostbackPayload(
+                run_id=run_id,
+                status=RunStatus.COMPLETED,
+                failed_sources=failed_sources,
+            ),
+        )
 
     async def _send_postback(self, url: str, payload: PostbackPayload) -> None:
         timeout = get_settings().webhook_timeout

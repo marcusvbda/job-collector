@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
     webhook_timeout: float = 30
+    source_timeout: float = 120
 
 
 @lru_cache
