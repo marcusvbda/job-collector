@@ -8,14 +8,20 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.models.job import JobModel
+from app.sources.fourdayweek import FourDayWeekSource
 from app.sources.github import GithubSource
+from app.sources.realjobsfromanywhere import RealJobsFromAnywhereSource
 from app.sources.source import SourceBase
 
 logger = logging.getLogger(__name__)
 
 SourceFactory = Callable[[], SourceBase]
 
-ENABLED_SOURCES: list[SourceFactory] = [GithubSource]
+ENABLED_SOURCES: list[SourceFactory] = [
+    GithubSource,
+    RealJobsFromAnywhereSource,
+    FourDayWeekSource,
+]
 
 
 class RunStatus(StrEnum):

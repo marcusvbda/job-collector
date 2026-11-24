@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     webhook_timeout: float = 30
     source_timeout: float = 120
+    realjobs_max_pages: int = 20
+    fourdayweek_max_pages: int = 20
 
 
 @lru_cache
