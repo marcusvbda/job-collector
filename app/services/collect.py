@@ -29,6 +29,7 @@ class PostbackPayload(BaseModel):
     status: RunStatus
     source: str | None = None
     jobs: list[JobModel] = []
+    qty: int = 0
     error: str | None = None
     failed_sources: list[str] = []
 
@@ -36,6 +37,7 @@ class PostbackPayload(BaseModel):
 class CollectService:
     async def run_and_notify(self, run_id: str, postback_url: str) -> None:
         failed_sources: list[str] = []
+        total_qty = 0
 
         async def collect_one(factory: SourceFactory) -> None:
             name = getattr(factory, "__name__", "unknown")
@@ -54,11 +56,14 @@ class CollectService:
                     error=str(exc) or type(exc).__name__,
                 )
             else:
+                nonlocal total_qty
+                total_qty += len(jobs)
                 payload = PostbackPayload(
                     run_id=run_id,
                     status=RunStatus.COLLECTING,
                     source=name,
                     jobs=jobs,
+                    qty=len(jobs),
                 )
             await self._send_postback(postback_url, payload)
 
@@ -71,6 +76,7 @@ class CollectService:
             PostbackPayload(
                 run_id=run_id,
                 status=RunStatus.COMPLETED,
+                qty=total_qty,
                 failed_sources=failed_sources,
             ),
         )
